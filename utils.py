@@ -131,6 +131,7 @@ def run_cmd(code):
         return result
     except Exception as e:
         logger.error(f"出现错误! {e}")
+        logger.opt(exception=True).debug("命令执行异常堆栈:")
         return
 
 
