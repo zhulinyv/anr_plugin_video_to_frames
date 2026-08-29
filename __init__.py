@@ -20,7 +20,7 @@ def register(plugin: Plugin):
             Field(id="save_path", label="保存目录", type="path", folder=True, file=False),
         ],
         actions=[
-            Action(id="run", label="✂️ 拆分", inputs=["video", "save_path"], handler=lambda v: {"text": extract_frames(v.get("video", ""), v.get("save_path", ""))}),
+            Action(id="run", label="✂️ 拆分", inputs=["video", "save_path"], uses_novelai=False, handler=lambda v: {"text": extract_frames(v.get("video", ""), v.get("save_path", ""))}),
         ],
     )
 
@@ -35,7 +35,7 @@ def register(plugin: Plugin):
             Field(id="save_path", label="保存目录", type="path", folder=True, file=False),
         ],
         actions=[
-            Action(id="run", label="🔗 合并", inputs=["frames_path", "save_path", "fps"], handler=lambda v: {"text": frames_to_video(v.get("frames_path", ""), v.get("save_path", ""), int(v.get("fps", 24)))}),
+            Action(id="run", label="🔗 合并", inputs=["frames_path", "save_path", "fps"], uses_novelai=False, handler=lambda v: {"text": frames_to_video(v.get("frames_path", ""), v.get("save_path", ""), int(v.get("fps", 24)))}),
         ],
     )
 
@@ -50,7 +50,7 @@ def register(plugin: Plugin):
             Field(id="save_path", label="保存目录", type="path", folder=True, file=False),
         ],
         actions=[
-            Action(id="run", label="🎵 合并", inputs=["video", "audio", "save_path"], handler=lambda v: {"text": audio2video(v.get("video", ""), v.get("audio", ""), v.get("save_path", ""))}),
+            Action(id="run", label="🎵 合并", inputs=["video", "audio", "save_path"], uses_novelai=False, handler=lambda v: {"text": audio2video(v.get("video", ""), v.get("audio", ""), v.get("save_path", ""))}),
         ],
     )
 
@@ -71,6 +71,7 @@ def register(plugin: Plugin):
             Action(
                 id="run",
                 label="⚡ 补帧",
+                uses_novelai=False,  # 本地 RIFE 补帧
                 inputs=["video", "save_path", "spatial_tta", "temporal_tta", "uhd", "model"],
                 handler=lambda v: {"text": rife(v.get("video", ""), v.get("save_path", ""), v.get("spatial_tta", False), v.get("temporal_tta", False), v.get("uhd", False), v.get("model", "rife-v2.3"))},
             ),
