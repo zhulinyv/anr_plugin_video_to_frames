@@ -2,14 +2,33 @@ import os
 import re
 import subprocess
 
-import cv2
-from moviepy import AudioFileClip, VideoFileClip
-
 from utils import download, extract
 from utils.logger import logger
 
+# cv2 / moviepy 的 import 各要 0.1~0.7 秒, 原来写在模块顶层 → 每次启动都为"这次没用到视频"
+# 的场合付钱。改成在真正用到的函数里 import (模块属性按名字取, 调用点写法不变)。
+
+
+def _cv2():
+    import cv2
+
+    return cv2
+
+
+def _moviepy():
+    from moviepy import AudioFileClip, VideoFileClip
+
+    return AudioFileClip, VideoFileClip
+
+
+def warmup() -> None:
+    """后台预热: 启动时提前把 cv2 / moviepy 加载好 (由 utils.plugins 在后台线程调用)。"""
+    _cv2()
+    _moviepy()
+
 
 def extract_frames(video_path: str, output_dir: str) -> None:
+    cv2 = _cv2()
     logger.info("开始拆分...")
     os.makedirs(output_dir, exist_ok=True)
 
@@ -35,6 +54,7 @@ def extract_frames(video_path: str, output_dir: str) -> None:
 
 
 def frames_to_video(images_folder: str, output_dir: str, fps: int = 24, output_filename: str = 'frames_to_video.mp4') -> str:
+    cv2 = _cv2()
     logger.info("正在合并帧序列为视频...")
     if not os.path.isdir(images_folder):
         logger.error(f"图片文件夹不存在: {images_folder}")
@@ -81,6 +101,7 @@ def frames_to_video(images_folder: str, output_dir: str, fps: int = 24, output_f
 
 
 def video2audio(video_path, save_path):
+    _, VideoFileClip = _moviepy()
     clip = VideoFileClip(video_path)
     audio = clip.audio
     audio.write_audiofile(os.path.join(save_path, "extract_audio.mp3"), logger=None)
@@ -93,6 +114,7 @@ def video2audio(video_path, save_path):
 
 
 def audio2video(video_path, audio_path, save_path):
+    AudioFileClip, VideoFileClip = _moviepy()
     logger.info("正在合并音频到视频...")
     audio_extensions = ('.mp4', '.avi', '.mov', '.mkv', '.flv', '.wmv')
     if audio_path.lower().endswith(audio_extensions):

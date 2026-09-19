@@ -1,7 +1,7 @@
 """视频处理插件: 拆分 / 合并 / 音频合成 / 补帧。"""
 from __future__ import annotations
 
-from plugins.anr_plugin_video_to_frames.utils import audio2video, extract_frames, frames_to_video, rife
+from plugins.anr_plugin_video_to_frames.utils import audio2video, extract_frames, frames_to_video, rife, warmup
 from utils.plugins import Action, Field, Panel, Plugin
 
 
@@ -79,3 +79,5 @@ def register(plugin: Plugin):
     )
 
     plugin.panels.extend([extract_panel, merge_panel, audio_panel, rife_panel])
+    # 后台预热 cv2 / moviepy: 插件提前就绪, 首次点击不必等
+    plugin.warmup = warmup
