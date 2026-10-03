@@ -117,6 +117,9 @@ def audio2video(video_path, audio_path, save_path):
     AudioFileClip, VideoFileClip = _moviepy()
     logger.info("正在合并音频到视频...")
     audio_extensions = ('.mp4', '.avi', '.mov', '.mkv', '.flv', '.wmv')
+    # clip 只在"音频本身是视频"分支才会绑定; 原先未初始化, 非视频音频时下面的
+    # clip.close() 会抛 NameError 并被 except 静默吞掉 (源 clip 也就永远不关)。
+    clip = None
     if audio_path.lower().endswith(audio_extensions):
         logger.info("正在提取音频...")
         clip = VideoFileClip(audio_path)
@@ -134,23 +137,40 @@ def audio2video(video_path, audio_path, save_path):
         preset="medium",
         logger=None
     )
-    try:
-        clip.close()
-        ad.close()
-        vd.close()
-        vd2.close()
-    except Exception:
-        pass
+    # 逐个关闭: 某一个失败不应让后面的对象泄漏
+    for _obj in (clip, ad, vd, vd2):
+        if _obj is None:
+            continue
+        try:
+            _obj.close()
+        except Exception:
+            pass
     logger.success(f"视频已生成: {output_path}")
     return f"视频已生成: {output_path}"
 
 
 def run_cmd(code):
+    """执行补帧/超分引擎命令, 返回输出的尾部文本。
+
+    原先用 communicate() 把全部输出缓存在内存里 (高分辨率下可达几十 MB);
+    这里重定向到临时文件, 只读回尾部 (真正的错误/统计信息都在末尾)。
+    """
+    import tempfile
+
     try:
-        p = subprocess.Popen(code, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        stdout, stderr = p.communicate()
-        result = (stdout or stderr).decode("gb18030", errors="ignore").strip()
-        return result
+        with tempfile.TemporaryFile() as buf:
+            p = subprocess.Popen(code, stdout=buf, stderr=subprocess.STDOUT)
+            p.wait()
+            try:
+                buf.seek(0, os.SEEK_END)
+                size = buf.tell()
+                buf.seek(max(0, size - 8192))
+            except OSError:
+                pass
+            raw = buf.read()
+        if not raw:
+            return None
+        return raw.decode("gb18030", errors="ignore").strip()
     except Exception as e:
         logger.error(f"出现错误! {e}")
         logger.opt(exception=True).debug("命令执行异常堆栈:")
