@@ -4,6 +4,7 @@ import subprocess
 
 from utils import download, extract
 from utils.logger import logger
+from utils.paths import job_temp_path
 
 # cv2 / moviepy 的 import 各要 0.1~0.7 秒, 原来写在模块顶层 → 每次启动都为"这次没用到视频"
 # 的场合付钱。改成在真正用到的函数里 import (模块属性按名字取, 调用点写法不变)。
@@ -27,15 +28,24 @@ def warmup() -> None:
     _moviepy()
 
 
-def extract_frames(video_path: str, output_dir: str) -> None:
+def extract_frames(video_path: str, output_dir: str) -> str:
+    """把视频逐帧导出为 PNG, 返回给前端展示的一行结果文本。
+
+    返回值恒为 str: 失败时返回可读的错误说明, 而不是 None。
+    (原标注是 None 且失败分支直接 return, 前端 {"text": ...} 会拿到 null 并显示成空。)
+    """
     cv2 = _cv2()
     logger.info("开始拆分...")
+    if not video_path:
+        return "❌ 请先选择视频文件"
+    if not os.path.isfile(video_path):
+        return f"❌ 视频文件不存在: {video_path}"
     os.makedirs(output_dir, exist_ok=True)
 
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
         logger.error("无法打开视频文件")
-        return
+        return f"❌ 无法打开视频文件: {os.path.basename(video_path)}"
 
     frame_count = 0
     while True:
@@ -56,9 +66,12 @@ def extract_frames(video_path: str, output_dir: str) -> None:
 def frames_to_video(images_folder: str, output_dir: str, fps: int = 24, output_filename: str = 'frames_to_video.mp4') -> str:
     cv2 = _cv2()
     logger.info("正在合并帧序列为视频...")
+    # 与 extract_frames 一致: 失败也返回可读文本, 不返回 None (前端 {"text": ...} 会显示成空)
+    if not images_folder:
+        return "❌ 请先选择帧目录"
     if not os.path.isdir(images_folder):
         logger.error(f"图片文件夹不存在: {images_folder}")
-        return
+        return f"❌ 图片文件夹不存在: {images_folder}"
 
     os.makedirs(output_dir, exist_ok=True)
     output_path = os.path.join(output_dir, output_filename)
@@ -70,7 +83,7 @@ def frames_to_video(images_folder: str, output_dir: str, fps: int = 24, output_f
     image_files = [f for f in os.listdir(images_folder) if f.lower().endswith(valid_ext)]
     if not image_files:
         logger.error(f"文件夹中没有支持的图片文件: {images_folder}")
-        return
+        return f"❌ 文件夹中没有支持的图片: {images_folder}"
 
     image_files.sort(key=natural_sort_key)
     logger.info(f"找到 {len(image_files)} 张图片，将按顺序合成视频...")
@@ -79,8 +92,8 @@ def frames_to_video(images_folder: str, output_dir: str, fps: int = 24, output_f
     frame = cv2.imread(first_img_path)
     if frame is None:
         logger.error(f"无法读取图片: {first_img_path}")
-        return
-    height, width, _ = frame.shape
+        return f"❌ 无法读取图片: {image_files[0]}"
+    height, width = frame.shape[:2]  # 灰度帧是 2 维, 解包成 3 个会 ValueError
 
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')  # 使用 mp4v 编码，输出 .mp4
     video_writer = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
@@ -102,20 +115,34 @@ def frames_to_video(images_folder: str, output_dir: str, fps: int = 24, output_f
 
 def video2audio(video_path, save_path):
     _, VideoFileClip = _moviepy()
+    if not video_path or not os.path.isfile(video_path):
+        return f"❌ 视频文件不存在: {video_path}"
+    os.makedirs(save_path, exist_ok=True)
     clip = VideoFileClip(video_path)
     audio = clip.audio
-    audio.write_audiofile(os.path.join(save_path, "extract_audio.mp3"), logger=None)
+    if audio is None:
+        clip.close()
+        return f"❌ 该视频没有音轨: {os.path.basename(video_path)}"
+    out = os.path.join(save_path, "extract_audio.mp3")
+    audio.write_audiofile(out, logger=None)
     try:
         clip.close()
         audio.close()
     except Exception:
         pass
-    return
+    logger.success(f"音频已提取: {out}")
+    return f"音频已提取: {out}"
 
 
 def audio2video(video_path, audio_path, save_path):
     AudioFileClip, VideoFileClip = _moviepy()
     logger.info("正在合并音频到视频...")
+    # 与其它动作一致: 前置条件不满足时返回可读文本 (前端 {"text": ...} 不会显示成空)
+    if not video_path or not os.path.isfile(video_path):
+        return f"❌ 视频文件不存在: {video_path}"
+    if not audio_path or not os.path.isfile(audio_path):
+        return f"❌ 音频文件不存在: {audio_path}"
+    os.makedirs(save_path, exist_ok=True)
     audio_extensions = ('.mp4', '.avi', '.mov', '.mkv', '.flv', '.wmv')
     # clip 只在"音频本身是视频"分支才会绑定; 原先未初始化, 非视频音频时下面的
     # clip.close() 会抛 NameError 并被 except 静默吞掉 (源 clip 也就永远不关)。
@@ -179,14 +206,21 @@ def run_cmd(code):
 
 def rife(frames_path, output_path, x, z, u, model):
     logger.info("开始补帧...")
+    # 前置校验放在下载引擎之前: 路径填错时不该先付十几 MB 的下载成本
+    if not frames_path or not os.path.isdir(frames_path):
+        return f"❌ 帧目录不存在: {frames_path}"
+    if not output_path:
+        return "❌ 请先选择输出目录"
     if not os.path.exists("./assets/rife-ncnn-vulkan"):
         logger.debug("正在下载 rife-ncnn-vulkan 超分引擎")
+        # 安装包下载一次、解压即弃: 放 data/temp, 不污染 outputs/ (见 utils/paths.py)
+        _zip = str(job_temp_path("rife_engine.zip"))
         download(
             "https://huggingface.co/datasets/Xytpz/ANR_Upscale_Engine/resolve/main/rife-ncnn-vulkan.zip?download=true",
-            "./outputs/temp.zip",
+            _zip,
         )
         logger.debug("正在解压 rife-ncnn-vulkan 到 ./assets/rife-ncnn-vulkan")
-        extract("./outputs/temp.zip", "./assets/rife-ncnn-vulkan")
+        extract(_zip, "./assets/rife-ncnn-vulkan")
 
     code = f'.\\assets\\rife-ncnn-vulkan\\rife-ncnn-vulkan.exe -i "{os.path.abspath(frames_path)}" -o "{os.path.abspath(output_path)}" -m {model}'
 
@@ -201,5 +235,11 @@ def rife(frames_path, output_path, x, z, u, model):
 
     result = run_cmd(code)
     logger.info(f"输出: {result}")
+    # 引擎不存在 / 退出码非 0 / 没有产出帧: 都按失败上报, 不再谎报"处理完成"
+    exe = os.path.join("assets", "rife-ncnn-vulkan", "rife-ncnn-vulkan.exe")
+    if not os.path.exists(exe):
+        return f"❌ 补帧引擎缺失 (下载或解压失败): {exe}"
+    if result is None:
+        return "❌ 补帧失败: 引擎没有输出 (详见运行日志)"
     logger.info(f"处理完成: {output_path}")
     return f"处理完成: {output_path}"
